@@ -1,7 +1,11 @@
 import jinja2
 import json
 import os
-import pkg_resources
+
+try:
+    from importlib_resources import files as resource_files  # type: ignore
+except ImportError:
+    from importlib.resources import files as resource_files
 
 from typing import Optional
 
@@ -11,7 +15,7 @@ json_defs_file = ''
 # helper for loading and processing the definitions, component list, etc
 def map_load(pair: list):
     # load the default components
-    comp_string = pkg_resources.resource_string(__name__, json_defs_file)
+    comp_string = resource_files('json2daisy').joinpath(json_defs_file).read_text()
     component_defs = json.loads(comp_string)
 
     pair[1]['name'] = pair[0]
@@ -193,16 +197,16 @@ def generate_header(board_description_dict: dict) -> 'tuple[str, dict]':
         target['aliases'] = {}
 
     if 'display' in target:
-        # apply defaults
-        target['display'] = {
-          'driver': "daisy::SSD130x4WireSpi128x64Driver",
-          'config': [],
-          'dim': [128, 64]
-        }
+        # apply defaults if not present in config
+        target['display']['driver'] = target['display'].get('driver', "daisy::SSD130x4WireSpi128x64Driver")
+        target['display']['config'] = target['display'].get('config', [])
+        target['display']['dim'] = target['display'].get('dim', [128, 64])
 
         target['defines']['OOPSY_TARGET_HAS_OLED'] = 1
         target['defines']['OOPSY_OLED_DISPLAY_WIDTH'] = target['display']['dim'][0]
         target['defines']['OOPSY_OLED_DISPLAY_HEIGHT'] = target['display']['dim'][1]
+
+        target['displayprocess'] = target['display'].get('process', '')
 
     replacements = {}
     replacements['name'] = target['name']
@@ -232,7 +236,7 @@ def generate_header(board_description_dict: dict) -> 'tuple[str, dict]':
         components, 'component', ['AnalogControl', 'AnalogControlBipolar'],
         'map_init', key_exclude='default', match_exclude=True)
 
-    comp_string = pkg_resources.resource_string(__name__, json_defs_file)
+    comp_string = resource_files('json2daisy').joinpath(json_defs_file).read_text()
     definitions_dict = json.loads(comp_string)
 
     for name in definitions_dict:
@@ -270,7 +274,7 @@ def generate_header(board_description_dict: dict) -> 'tuple[str, dict]':
     replacements['hidupdaterates'] = filter_map_template(
         components, 'updaterate', key_exclude='default', match_exclude=True)
 
-    license_string = pkg_resources.resource_string(__package__, 'resources/LICENSE').decode('utf-8')
+    license_string = resource_files('json2daisy').joinpath('resources/LICENSE').read_text()
     replacements['license'] = '/*\n * ' + '\n * '.join([line for line in license_string.split('\n')]) + '\n */'
 
     component_declarations = list(filter(lambda x: not x.get('default', False), components))
@@ -296,12 +300,12 @@ def generate_header(board_description_dict: dict) -> 'tuple[str, dict]':
     # rendered_header = env.get_template('daisy.h').render(replacements)
 
     # This following works, but is really annoying
-    header_str = pkg_resources.resource_string(__name__, os.path.join('templates', 'daisy.h'))
+    header_str = resource_files('json2daisy').joinpath(os.path.join('templates', 'daisy.h')).read_text()
     header_env = jinja2.Environment(
         loader=jinja2.BaseLoader(),
         trim_blocks=True,
         lstrip_blocks=True
-    ).from_string(header_str.decode('utf-8'))
+    ).from_string(header_str)
 
     rendered_header = header_env.render(replacements)
 
@@ -322,7 +326,8 @@ def generate_header(board_description_dict: dict) -> 'tuple[str, dict]':
         'components': components,
         'aliases': target['aliases'],
         'channels': audio_channels,
-        'has_midi': target.get('has_midi', False)
+        'has_midi': target.get('has_midi', False),
+        'displayprocess': target.get('displayprocess', '')
       }
 
     return rendered_header, board_info
@@ -360,7 +365,7 @@ def generate_header_from_name(board_name: str) -> 'tuple[str, dict]':
 
     try:
         description_file = os.path.join('resources', f'{board_name}.json')
-        daisy_description = pkg_resources.resource_string(__name__, description_file)
+        daisy_description = resource_files('json2daisy').joinpath(description_file).read_text()
         daisy_description_dict = json.loads(daisy_description)
     except FileNotFoundError:
         raise FileNotFoundError(f'Unknown Daisy board   "{board_name}"')
